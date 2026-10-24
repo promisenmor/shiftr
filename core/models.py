@@ -82,6 +82,7 @@ class Shift(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="shifts")
     entry_mode = models.CharField(max_length=10, choices=EntryMode.choices)
+    shift_date = models.DateField(null=True, blank=True)
     start_at = models.DateTimeField(null=True, blank=True)
     end_at = models.DateTimeField(null=True, blank=True)
     duration_minutes = models.PositiveIntegerField(null=True, blank=True)
@@ -95,6 +96,7 @@ class Shift(models.Model):
                 condition=(
                     Q(
                         entry_mode="timed",
+                        shift_date__isnull=True,
                         start_at__isnull=False,
                         end_at__isnull=False,
                         duration_minutes__isnull=True,
@@ -103,6 +105,7 @@ class Shift(models.Model):
                 )
                 | Q(
                     entry_mode="duration",
+                    shift_date__isnull=False,
                     start_at__isnull=True,
                     end_at__isnull=True,
                     duration_minutes__gt=0,
@@ -110,7 +113,10 @@ class Shift(models.Model):
                 name="shift_entry_matches_mode",
             ),
         ]
-        indexes = [models.Index(fields=("user", "start_at"))]
+        indexes = [
+            models.Index(fields=("user", "start_at")),
+            models.Index(fields=("user", "shift_date")),
+        ]
         ordering = ("start_at", "created_at")
 
     def __str__(self):
@@ -128,6 +134,10 @@ class Break(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                condition=Q(duration_minutes__gte=0),
+                name="break_duration_nonnegative",
+            ),
             models.CheckConstraint(
                 condition=(
                     Q(start_at__isnull=True, end_at__isnull=True)

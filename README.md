@@ -43,16 +43,36 @@ returned token on authenticated requests as `Authorization: Token <token>`.
 
 ## Phase One API
 
+Interactive Swagger documentation is available at `/api/docs/`; the generated
+OpenAPI schema is at `/api/schema/`. Shift and target endpoints require the
+authenticated user's token.
+
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | POST | `/api/auth/register/` | Create an account and return its token |
 | POST | `/api/auth/login/` | Authenticate and return a token |
 | POST | `/api/auth/logout/` | Revoke the current token |
 | GET, PATCH | `/api/profile/` | Read or update the authenticated user's display name |
+| GET, POST | `/api/shifts/` | List or record shifts (`start_date` and `end_date` filters supported) |
+| GET, PATCH, PUT, DELETE | `/api/shifts/{id}/` | Retrieve, edit, or delete an owned shift |
+| GET | `/api/weekly-targets/` | List the user's saved weekly targets |
+| PUT | `/api/weekly-targets/{week_start}/` | Set or change a target in minutes for a Monday-start week |
+| GET | `/api/weeks/{week_start}/summary/` | Get weekly work, target, remaining time, overtime, and shifts |
 
-The initial schema also defines user-owned weekly targets, shifts, and breaks.
-Shift CRUD, target endpoints, and weekly calculations are the next backend
-milestone; weekly calculations use Monday-to-Monday weeks in `Europe/London`.
+Timed shifts accept `entry_mode: "timed"` with `start_at` and `end_at` ISO
+date-times. Include the UTC offset for ambiguous daylight-saving times. For
+example, an unpaid break can be sent as
+`{"duration_minutes": 30, "is_paid": false}`. Exact break start/end times are
+required when an unpaid break affects allocation across weekly boundaries.
+Duration-only shifts use `entry_mode: "duration"`, `shift_date`, and a positive
+`duration_minutes`; their work is allocated to the week containing that date.
+
+Weeks run Monday through Sunday in `Europe/London`. The API derives all totals
+from saved shifts: unpaid breaks are deducted, paid breaks count as work, and
+overnight work is split at local Monday midnight. A new week's previous target
+is returned as a suggestion only; saving a target for one week never changes
+other weeks. Remaining time is clamped at zero, with overtime reported
+separately. The same rules apply after a shift is edited or deleted.
 
 Run the backend tests with:
 
