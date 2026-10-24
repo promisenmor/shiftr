@@ -38,20 +38,25 @@ $env:DB_NAME = ":memory:"
 .\venv\bin\python.exe manage.py test
 ```
 
-The API uses email/password authentication and DRF token authentication. Send the
-returned token on authenticated requests as `Authorization: Token <token>`.
+The API uses email/password authentication and JWT access/refresh tokens. Send
+the access token on authenticated requests as
+`Authorization: Bearer <access-token>`. Access tokens expire after 15 minutes;
+refresh tokens expire after 7 days and rotate when refreshed.
 
 ## Phase One API
 
 Interactive Swagger documentation is available at `/api/docs/`; the generated
 OpenAPI schema is at `/api/schema/`. Shift and target endpoints require the
-authenticated user's token.
+authenticated user's bearer access token. Logout accepts the current refresh
+token in a `refresh` field; it does not immediately invalidate an already issued
+access token, which remains valid until its short expiration.
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| POST | `/api/auth/register/` | Create an account and return its token |
-| POST | `/api/auth/login/` | Authenticate and return a token |
-| POST | `/api/auth/logout/` | Revoke the current token |
+| POST | `/api/auth/register/` | Create an account and return an access/refresh token pair |
+| POST | `/api/auth/login/` | Authenticate and return an access/refresh token pair |
+| POST | `/api/auth/refresh/` | Exchange a refresh token for a rotated token pair |
+| POST | `/api/auth/logout/` | Revoke the authenticated user's refresh token |
 | GET, PATCH | `/api/profile/` | Read or update the authenticated user's display name |
 | GET, POST | `/api/shifts/` | List or record shifts (`start_date` and `end_date` filters supported) |
 | GET, PATCH, PUT, DELETE | `/api/shifts/{id}/` | Retrieve, edit, or delete an owned shift |

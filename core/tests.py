@@ -6,8 +6,9 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from .models import Shift, WeeklyTarget
 
@@ -24,7 +25,7 @@ class AuthenticationApiTests(TestCase):
             display_name="Worker",
         )
 
-    def test_registration_creates_email_user_and_returns_token(self):
+    def test_registration_creates_email_user_and_returns_jwt_pair(self):
         response = self.client.post(
             reverse("register"),
             {
@@ -36,11 +37,11 @@ class AuthenticationApiTests(TestCase):
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["user"]["email"], "new.worker@example.com")
-        self.assertTrue(
-            Token.objects.filter(
-                key=response.data["token"],
-                user__email="new.worker@example.com",
-            ).exists()
+        access = AccessToken(response.data["access"])
+        self.assertEqual(str(access["user_id"]), str(response.data["user"]["id"]))
+        self.assertEqual(
+            str(RefreshToken(response.data["refresh"]).get("user_id")),
+            str(response.data["user"]["id"]),
         )
 
     def test_registration_rejects_duplicate_email_and_weak_password(self):
@@ -67,28 +68,68 @@ class AuthenticationApiTests(TestCase):
             str(response.data["non_field_errors"][0]), "Invalid email or password."
         )
 
-    def test_login_and_logout_issue_and_revoke_token(self):
+    def test_login_refresh_rotation_and_logout_revoke_refresh_token(self):
         response = self.client.post(
             reverse("login"),
             {"email": self.user.email.upper(), "password": "C0mpl3x-Weekly-Shift!"},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        token = response.data["token"]
+        access = response.data["access"]
+        refresh = response.data["refresh"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        self.assertEqual(self.client.get(reverse("profile")).status_code, status.HTTP_200_OK)
 
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
-        logout_response = self.client.post(reverse("logout"))
+        refresh_response = self.client.post(reverse("token-refresh"), {"refresh": refresh})
+        self.assertEqual(refresh_response.status_code, status.HTTP_200_OK)
+        rotated_refresh = refresh_response.data["refresh"]
+        self.assertNotEqual(rotated_refresh, refresh)
+        with self.assertRaises(TokenError):
+            RefreshToken(refresh)
+        replay_response = self.client.post(
+            reverse("token-refresh"),
+            {"refresh": refresh},
+        )
+        self.assertEqual(replay_response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+        logout_response = self.client.post(
+            reverse("logout"),
+            {"refresh": rotated_refresh},
+            format="json",
+        )
         self.assertEqual(logout_response.status_code, status.HTTP_204_NO_CONTENT)
-        self.assertFalse(Token.objects.filter(key=token).exists())
-        profile_response = self.client.get(reverse("profile"))
-        self.assertEqual(profile_response.status_code, status.HTTP_401_UNAUTHORIZED)
+        with self.assertRaises(TokenError):
+            RefreshToken(rotated_refresh)
+        self.assertEqual(self.client.get(reverse("profile")).status_code, status.HTTP_200_OK)
+
+    def test_logout_rejects_another_users_refresh_token(self):
+        other_user = User.objects.create_user(
+            email="other@example.com",
+            password="C0mpl3x-Weekly-Shift!",
+        )
+        own_refresh = RefreshToken.for_user(self.user)
+        other_refresh = RefreshToken.for_user(other_user)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {str(own_refresh.access_token)}"
+        )
+
+        response = self.client.post(
+            reverse("logout"),
+            {"refresh": str(other_refresh)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("does not belong", str(response.data["refresh"][0]))
+        self.assertEqual(str(RefreshToken(str(other_refresh))), str(other_refresh))
 
     def test_profile_is_authenticated_and_updates_only_current_user(self):
         response = self.client.get(reverse("profile"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-        token = Token.objects.create(user=self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {str(refresh.access_token)}"
+        )
         response = self.client.patch(
             reverse("profile"), {"display_name": "Updated name"}, format="json"
         )

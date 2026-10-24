@@ -273,5 +273,5 @@ class ShiftApiTests(TestCase):
         self.assertEqual(swagger.status_code, status.HTTP_200_OK)
         self.assertIn("/api/shifts/", schema.data["paths"])
         self.assertIn("/api/weeks/{week_start}/summary/", schema.data["paths"])
-        self.assertIn("tokenAuth", schema.data["components"]["securitySchemes"])
+        self.assertIn("jwtAuth", schema.data["components"]["securitySchemes"])
         self.assertIn("swagger-ui", swagger.content.decode())
