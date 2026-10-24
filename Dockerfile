@@ -16,8 +16,7 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
-RUN python manage.py collectstatic --noinput \
-    && chmod +x docker-entrypoint.sh \
+RUN chmod +x docker-entrypoint.sh \
     && groupadd --system shiftr \
     && useradd --system --gid shiftr --home-dir /app shiftr \
     && chown -R shiftr:shiftr /app

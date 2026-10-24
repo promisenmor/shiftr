@@ -9,6 +9,8 @@ from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .calculations import calculate_shift
 from .models import Break, Shift, WeeklyTarget
@@ -57,8 +59,35 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class TokenResponseSerializer(serializers.Serializer):
-    token = serializers.CharField()
+    access = serializers.CharField()
+    refresh = serializers.CharField()
     user = UserSerializer()
+
+
+class RefreshTokenResponseSerializer(serializers.Serializer):
+    access = serializers.CharField()
+    refresh = serializers.CharField(required=False)
+
+
+class LogoutSerializer(serializers.Serializer):
+    refresh = serializers.CharField(write_only=True)
+
+    def validate_refresh(self, value):
+        try:
+            token = RefreshToken(value)
+        except TokenError as error:
+            raise serializers.ValidationError(
+                _("The refresh token is invalid or expired.")
+            ) from error
+        if str(token.get("user_id")) != str(self.context["request"].user.pk):
+            raise serializers.ValidationError(
+                _("The refresh token does not belong to the authenticated user.")
+            )
+        self.token = token
+        return value
+
+    def save(self, **kwargs):
+        self.token.blacklist()
 
 
 class RegistrationSerializer(serializers.Serializer):

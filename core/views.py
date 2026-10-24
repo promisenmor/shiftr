@@ -3,11 +3,13 @@ from datetime import date
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import generics, status
-from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Shift
 from .selectors import (
@@ -17,7 +19,9 @@ from .selectors import (
 )
 from .serializers import (
     LoginSerializer,
+    LogoutSerializer,
     ProfileSerializer,
+    RefreshTokenResponseSerializer,
     RegistrationSerializer,
     ShiftFilterSerializer,
     ShiftSerializer,
@@ -58,9 +62,13 @@ class RegisterView(APIView):
         serializer = RegistrationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        token, _ = Token.objects.get_or_create(user=user)
+        refresh = RefreshToken.for_user(user)
         return Response(
-            {"token": token.key, "user": UserSerializer(user).data},
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": UserSerializer(user).data,
+            },
             status=status.HTTP_201_CREATED,
         )
 
@@ -77,20 +85,48 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        token, _ = Token.objects.get_or_create(user=user)
-        return Response({"token": token.key, "user": UserSerializer(user).data})
+        refresh = RefreshToken.for_user(user)
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "user": UserSerializer(user).data,
+            }
+        )
+
+
+class RefreshView(APIView):
+    permission_classes = (AllowAny,)
+
+    @extend_schema(
+        request=TokenRefreshSerializer,
+        responses={200: RefreshTokenResponseSerializer, 401: None},
+        tags=["Authentication"],
+    )
+    def post(self, request):
+        serializer = TokenRefreshSerializer(data=request.data)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as error:
+            raise InvalidToken(_("The refresh token is invalid or expired.")) from error
+        return Response(serializer.validated_data)
 
 
 class LogoutView(APIView):
     permission_classes = (IsAuthenticated,)
 
     @extend_schema(
-        request=None,
+        request=LogoutSerializer,
         responses={204: None},
         tags=["Authentication"],
     )
     def post(self, request):
-        request.auth.delete()
+        serializer = LogoutSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
