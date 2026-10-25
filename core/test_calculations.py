@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone
 from unittest import TestCase
+from zoneinfo import ZoneInfo
 
 from .calculations import allocate_interval, calculate_shift, summarize_week
 
@@ -96,6 +97,50 @@ class ShiftCalculationTests(TestCase):
 
         self.assertEqual(sum(spring_forward.values()), 60)
         self.assertEqual(sum(autumn_back.values()), 60)
+
+    def test_sunday_to_monday_allocation_is_exact_across_dst_transition_weeks(self):
+        london = ZoneInfo("Europe/London")
+        spring_forward = calculate_shift(
+            entry_mode="timed",
+            start_at=datetime(2026, 3, 29, 22, tzinfo=london),
+            end_at=datetime(2026, 3, 30, 6, tzinfo=london),
+        )
+        autumn_back = calculate_shift(
+            entry_mode="timed",
+            start_at=datetime(2026, 10, 25, 22, tzinfo=london),
+            end_at=datetime(2026, 10, 26, 6, tzinfo=london),
+        )
+
+        expected_spring = {
+            date(2026, 3, 23): 120,
+            date(2026, 3, 30): 360,
+        }
+        expected_autumn = {
+            date(2026, 10, 19): 120,
+            date(2026, 10, 26): 360,
+        }
+        self.assertEqual(spring_forward.weekly_minutes, expected_spring)
+        self.assertEqual(autumn_back.weekly_minutes, expected_autumn)
+        self.assertEqual(sum(spring_forward.weekly_minutes.values()), 480)
+        self.assertEqual(sum(autumn_back.weekly_minutes.values()), 480)
+
+    def test_elapsed_minutes_are_not_lost_or_duplicated_during_dst_changes(self):
+        london = ZoneInfo("Europe/London")
+        spring_shift = calculate_shift(
+            entry_mode="timed",
+            start_at=datetime(2026, 3, 29, 0, 30, tzinfo=london),
+            end_at=datetime(2026, 3, 29, 3, 30, tzinfo=london),
+        )
+        autumn_shift = calculate_shift(
+            entry_mode="timed",
+            start_at=datetime(2026, 10, 25, 0, 30, tzinfo=london),
+            end_at=datetime(2026, 10, 25, 2, 30, tzinfo=london),
+        )
+
+        self.assertEqual(spring_shift.gross_minutes, 120)
+        self.assertEqual(sum(spring_shift.weekly_minutes.values()), 120)
+        self.assertEqual(autumn_shift.gross_minutes, 180)
+        self.assertEqual(sum(autumn_shift.weekly_minutes.values()), 180)
 
     def test_invalid_durations_excessive_breaks_and_overlapping_breaks_are_rejected(self):
         with self.assertRaisesRegex(ValueError, "greater than zero"):

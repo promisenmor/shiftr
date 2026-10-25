@@ -137,6 +137,9 @@ class ShiftApiTests(TestCase):
         )
         self.assertEqual(update.status_code, status.HTTP_200_OK, update.data)
         self.assertEqual(
+            self.client.get(previous_summary_url).data["worked_minutes"], 120
+        )
+        self.assertEqual(
             self.client.get(next_summary_url).data["worked_minutes"], 420
         )
 
@@ -207,6 +210,19 @@ class ShiftApiTests(TestCase):
             format="json",
         )
         self.create_overnight_shift()
+        suggested_week = self.client.get(
+            reverse("weekly-summary", kwargs={"week_start": "2026-10-26"})
+        )
+        self.assertEqual(suggested_week.data["target_is_set"], False)
+        self.assertIsNone(suggested_week.data["target_minutes"])
+        self.assertEqual(suggested_week.data["suggested_target_minutes"], 300)
+
+        previous_week = self.client.get(
+            reverse("weekly-summary", kwargs={"week_start": "2026-10-19"})
+        )
+        self.assertEqual(previous_week.data["target_minutes"], 300)
+        self.assertEqual(previous_week.data["target_is_set"], True)
+
         next_target = self.client.put(
             reverse(
                 "weekly-target-detail",
