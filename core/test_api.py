@@ -150,6 +150,52 @@ class ShiftApiTests(TestCase):
         )
         self.assertEqual(self.client.get(next_summary_url).data["worked_minutes"], 0)
 
+    def test_monday_hours_from_sunday_overnight_shift_count_toward_new_week_target(
+        self,
+    ):
+        shift = self.client.post(
+            reverse("shift-list"),
+            {
+                "entry_mode": "timed",
+                "start_at": "2026-10-25T20:00:00+00:00",
+                "end_at": "2026-10-26T04:00:00+00:00",
+            },
+            format="json",
+        )
+        self.assertEqual(shift.status_code, status.HTTP_201_CREATED, shift.data)
+        expected_allocations = [
+            {"week_start": "2026-10-19", "minutes": 240},
+            {"week_start": "2026-10-26", "minutes": 240},
+        ]
+        self.assertEqual(shift.json()["weekly_allocations"], expected_allocations)
+
+        summary_url = reverse(
+            "weekly-summary", kwargs={"week_start": "2026-10-26"}
+        )
+        before_target = self.client.get(summary_url)
+        self.assertEqual(before_target.data["worked_minutes"], 240)
+        self.assertEqual(before_target.data["progress_percent"], 0)
+
+        target = self.client.put(
+            reverse(
+                "weekly-target-detail",
+                kwargs={"week_start": "2026-10-26"},
+            ),
+            {"target_minutes": 1140},
+            format="json",
+        )
+        summary = self.client.get(summary_url)
+
+        self.assertEqual(target.status_code, status.HTTP_200_OK, target.data)
+        self.assertEqual(summary.data["worked_minutes"], 240)
+        self.assertEqual(summary.data["target_minutes"], 1140)
+        self.assertEqual(summary.data["remaining_minutes"], 900)
+        self.assertEqual(summary.data["progress_percent"], 21)
+        self.assertEqual(
+            summary.json()["shifts"][0]["weekly_allocations"],
+            expected_allocations,
+        )
+
     def test_week_boundary_break_requires_timing_and_is_allocated_exactly(self):
         missing_timing = self.client.post(
             reverse("shift-list"),
