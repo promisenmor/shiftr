@@ -141,6 +141,10 @@ class LoginSerializer(serializers.Serializer):
         return attrs
 
 
+class GoogleSSOSerializer(serializers.Serializer):
+    credential = serializers.CharField(write_only=True, trim_whitespace=False)
+
+
 class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User

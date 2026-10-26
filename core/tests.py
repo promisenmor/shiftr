@@ -4,11 +4,13 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from unittest.mock import patch
 
 from .models import Shift, WeeklyTarget
 
@@ -138,6 +140,169 @@ class AuthenticationApiTests(TestCase):
         self.user.refresh_from_db()
         self.assertEqual(self.user.display_name, "Updated name")
         self.assertEqual(response.data["email"], self.user.email)
+
+
+@override_settings(GOOGLE_OAUTH_CLIENT_ID="google-client-id")
+class GoogleSSOApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.url = reverse("google-sso")
+
+    def google_claims(self, **overrides):
+        claims = {
+            "sub": "google-user-123",
+            "email": "worker@example.com",
+            "email_verified": True,
+            "name": "Google Worker",
+            "iss": "https://accounts.google.com",
+        }
+        claims.update(overrides)
+        return claims
+
+    @patch("core.views.verify_oauth2_token")
+    def test_verified_google_user_is_registered_and_receives_jwt_pair(
+        self, verify_token
+    ):
+        verify_token.return_value = self.google_claims()
+
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["user"]["email"], "worker@example.com")
+        self.assertEqual(response.data["user"]["display_name"], "Google Worker")
+        user = User.objects.get(email="worker@example.com")
+        self.assertEqual(user.google_sub, "google-user-123")
+        self.assertFalse(user.has_usable_password())
+        self.assertEqual(
+            str(AccessToken(response.data["access"])["user_id"]), str(user.pk)
+        )
+        verify_token.assert_called_once()
+        self.assertEqual(verify_token.call_args.kwargs["audience"], "google-client-id")
+
+    @patch("core.views.verify_oauth2_token")
+    def test_google_user_can_sign_in_again_using_stable_subject(self, verify_token):
+        user = User.objects.create_user(
+            email="worker@example.com",
+            password=None,
+            google_sub="google-user-123",
+        )
+        verify_token.return_value = self.google_claims(email="changed@example.com")
+
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["user"]["id"], user.pk)
+        self.assertEqual(User.objects.count(), 1)
+        user.refresh_from_db()
+        self.assertEqual(user.email, "worker@example.com")
+
+    @patch("core.views.verify_oauth2_token")
+    def test_verified_google_email_links_existing_account(self, verify_token):
+        user = User.objects.create_user(
+            email="Worker@Example.com",
+            password="C0mpl3x-Weekly-Shift!",
+            display_name="Existing Name",
+        )
+        verify_token.return_value = self.google_claims()
+
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["user"]["id"], user.pk)
+        user.refresh_from_db()
+        self.assertEqual(user.google_sub, "google-user-123")
+        self.assertEqual(user.display_name, "Existing Name")
+        self.assertTrue(user.has_usable_password())
+        self.assertEqual(User.objects.count(), 1)
+
+    @patch("core.views.verify_oauth2_token")
+    def test_google_subject_cannot_be_attached_to_another_users_account(
+        self, verify_token
+    ):
+        user = User.objects.create_user(
+            email="worker@example.com",
+            password="C0mpl3x-Weekly-Shift!",
+            google_sub="different-google-user",
+        )
+        verify_token.return_value = self.google_claims()
+
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        user.refresh_from_db()
+        self.assertEqual(user.google_sub, "different-google-user")
+        self.assertEqual(User.objects.count(), 1)
+
+    @patch("core.views.verify_oauth2_token")
+    def test_unverified_google_email_is_rejected(self, verify_token):
+        verify_token.return_value = self.google_claims(email_verified=False)
+
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(User.objects.count(), 0)
+
+    @patch("core.views.verify_oauth2_token")
+    def test_invalid_google_credential_is_rejected(self, verify_token):
+        verify_token.side_effect = ValueError("invalid credential")
+
+        response = self.client.post(
+            self.url,
+            {"credential": "invalid-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(User.objects.count(), 0)
+
+    @patch("core.views.verify_oauth2_token")
+    def test_missing_subject_is_rejected(self, verify_token):
+        verify_token.return_value = self.google_claims(sub="")
+
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(User.objects.count(), 0)
+
+    @override_settings(GOOGLE_OAUTH_CLIENT_ID="")
+    def test_google_sso_requires_oauth_client_configuration(self):
+        response = self.client.post(
+            self.url,
+            {"credential": "google-id-token"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_google_sso_requires_a_credential(self):
+        response = self.client.post(self.url, {}, format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
 class DomainModelTests(TestCase):

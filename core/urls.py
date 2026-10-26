@@ -5,6 +5,7 @@ from rest_framework.permissions import AllowAny
 from .views import (
     LoginView,
     LogoutView,
+    GoogleSSOView,
     ProfileView,
     RegisterView,
     RefreshView,
@@ -36,6 +37,7 @@ urlpatterns = [
     ),
     path("auth/register/", RegisterView.as_view(), name="register"),
     path("auth/login/", LoginView.as_view(), name="login"),
+    path("auth/google/", GoogleSSOView.as_view(), name="google-sso"),
     path("auth/refresh/", RefreshView.as_view(), name="token-refresh"),
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("profile/", ProfileView.as_view(), name="profile"),

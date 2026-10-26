@@ -43,6 +43,22 @@ the access token on authenticated requests as
 `Authorization: Bearer <access-token>`. Access tokens expire after 15 minutes;
 refresh tokens expire after 7 days and rotate when refreshed.
 
+## Google sign-in setup
+
+Create a Google OAuth 2.0 **Web application** client and configure its client ID
+as `GOOGLE_OAUTH_CLIENT_ID` in `.env` (and in the frontend Google Identity
+Services configuration). Restart the API after changing the environment.
+
+The frontend sends the Google Identity Services ID-token credential to
+`POST /api/auth/google/` as `{"credential": "<google-id-token>"}`. The backend
+validates the signature, issuer, expiry, and audience with Google, requires a
+verified email, then creates or signs in the account and returns Shiftr's
+normal JWT `access`, `refresh`, and `user` response. An existing account is
+linked only when its email matches Google's verified email; the Google subject
+is stored as the stable provider identifier. Google-only accounts have no
+usable password. Never send a Google access token or client secret in place of
+the ID-token credential.
+
 ## Phase One API
 
 Interactive Swagger documentation is available at `/api/docs/`; the generated
@@ -55,6 +71,7 @@ access token, which remains valid until its short expiration.
 | --- | --- | --- |
 | POST | `/api/auth/register/` | Create an account and return an access/refresh token pair |
 | POST | `/api/auth/login/` | Authenticate and return an access/refresh token pair |
+| POST | `/api/auth/google/` | Register or sign in using a verified Google ID token |
 | POST | `/api/auth/refresh/` | Exchange a refresh token for a rotated token pair |
 | POST | `/api/auth/logout/` | Revoke the authenticated user's refresh token |
 | GET, PATCH | `/api/profile/` | Read or update the authenticated user's display name |
