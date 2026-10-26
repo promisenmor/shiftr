@@ -21,6 +21,7 @@ services:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       DB_ENGINE: django.db.backends.postgresql
       DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
       DB_USER: ${DB_USER:?Set DB_USER in .env}

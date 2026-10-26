@@ -111,6 +111,8 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
+GOOGLE_OAUTH_CLIENT_ID = os.environ.get('GOOGLE_OAUTH_CLIENT_ID', '')
+
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
